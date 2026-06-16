@@ -96,3 +96,25 @@ CREATE TABLE IF NOT EXISTS analytics.student_indicators (
     at_risk_flag       BOOLEAN NOT NULL DEFAULT FALSE,
     computed_at        TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+-- ---------------------------------------------------------------------------
+-- Feedback delivery audit log (Phase 6: n8n automation + human-in-the-loop)
+-- ---------------------------------------------------------------------------
+-- Every feedback delivery / review decision is appended here so the n8n
+-- workflows (weekly delivery, teacher review) and the dashboard have an audit
+-- trail. Append-only; one row per event.
+
+CREATE TABLE IF NOT EXISTS analytics.feedback_log (
+    id            BIGSERIAL PRIMARY KEY,
+    student_id    TEXT NOT NULL REFERENCES core.dim_students (student_id),
+    channel       TEXT NOT NULL DEFAULT 'email'      -- email | slack | manual
+        CHECK (channel IN ('email', 'slack', 'manual')),
+    status        TEXT NOT NULL                       -- sent | approved | edited | rejected | failed
+        CHECK (status IN ('sent', 'approved', 'edited', 'rejected', 'failed')),
+    feedback_text TEXT,
+    note          TEXT,                               -- rejection reason / edit note
+    created_at    TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_feedback_log_student
+    ON analytics.feedback_log (student_id, created_at DESC);

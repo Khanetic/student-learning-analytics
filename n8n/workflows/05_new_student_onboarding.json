@@ -1,0 +1,198 @@
+{
+  "name": "05 — New Student Onboarding",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "new-students",
+        "options": {}
+      },
+      "name": "Webhook: New Students",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -540,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT student_id, name, program FROM core.dim_students WHERE enrollment_date >= CURRENT_DATE - INTERVAL '1 day'",
+        "additionalFields": {}
+      },
+      "name": "Fetch new students",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        -320,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "slaPostgresCred01",
+          "name": "SLA Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "name": "Loop students",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.SMTP_FROM }}",
+        "toEmail": "={{ $json.student_id }}@students.example.com",
+        "subject": "Welcome to the course!",
+        "text": "=Hi {{ $json.name }},\n\nWelcome to {{ $json.program }}. Your learning dashboard is now active and your first personalized feedback will arrive in two weeks.\n\n— The Teaching Team",
+        "emailFormat": "text",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Welcome email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        140,
+        220
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "slaMailhogSmtp01",
+          "name": "Mailhog SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"text\": \"🆕 New student onboarded: {{ $json.name }} ({{ $json.student_id }}) — {{ $json.program }}\" }",
+        "options": {}
+      },
+      "name": "Notify teacher (Slack/Trello)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        140,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 14,
+        "unit": "days"
+      },
+      "name": "Wait 2 weeks",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        380,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=http://api:8001/students/{{ $('Loop students').item.json.student_id }}/feedback",
+        "options": {}
+      },
+      "name": "First feedback (RAG)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        600,
+        380
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook: New Students": {
+      "main": [
+        [
+          {
+            "node": "Fetch new students",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch new students": {
+      "main": [
+        [
+          {
+            "node": "Loop students",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop students": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Welcome email",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Notify teacher (Slack/Trello)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Welcome email": {
+      "main": [
+        [
+          {
+            "node": "Loop students",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify teacher (Slack/Trello)": {
+      "main": [
+        [
+          {
+            "node": "Wait 2 weeks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 2 weeks": {
+      "main": [
+        [
+          {
+            "node": "First feedback (RAG)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false
+}

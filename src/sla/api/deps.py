@@ -12,8 +12,16 @@ import logging
 from functools import lru_cache
 
 import pandas as pd
+from sqlalchemy import text
 
-from sla.api.schemas import Indicators, QuizAttempt, SessionActivity, Student
+from sla.api.schemas import (
+    FeedbackLogEntry,
+    FeedbackLogIn,
+    Indicators,
+    QuizAttempt,
+    SessionActivity,
+    Student,
+)
 from sla.config import get_settings
 from sla.db import ANALYTICS_SCHEMA, CORE_SCHEMA, fetch_df, get_engine
 from sla.rag.provider import provider_name
@@ -61,6 +69,41 @@ class StudentRepository:
     def list_students(self) -> list[Student]:
         df = fetch_df(_STUDENT_QUERY + " ORDER BY s.student_id")
         return [_row_to_student(r) for _, r in df.iterrows()]
+
+    def list_at_risk(self) -> list[Student]:
+        df = fetch_df(
+            _STUDENT_QUERY + " WHERE i.at_risk_flag = TRUE ORDER BY s.student_id"
+        )
+        return [_row_to_student(r) for _, r in df.iterrows()]
+
+    def log_feedback(self, student_id: str, entry: FeedbackLogIn) -> FeedbackLogEntry:
+        """Append a feedback delivery / review event and return the stored row."""
+        engine = get_engine()
+        with engine.begin() as conn:
+            row = conn.execute(
+                text(
+                    f"""INSERT INTO {ANALYTICS_SCHEMA}.feedback_log
+                            (student_id, channel, status, feedback_text, note)
+                        VALUES (:student_id, :channel, :status, :feedback_text, :note)
+                        RETURNING id, created_at"""
+                ),
+                {
+                    "student_id": student_id,
+                    "channel": entry.channel,
+                    "status": entry.status,
+                    "feedback_text": entry.feedback_text,
+                    "note": entry.note,
+                },
+            ).one()
+        return FeedbackLogEntry(
+            id=row.id,
+            student_id=student_id,
+            created_at=row.created_at,
+            channel=entry.channel,
+            status=entry.status,
+            feedback_text=entry.feedback_text,
+            note=entry.note,
+        )
 
     def get_student(self, student_id: str) -> Student | None:
         df = fetch_df(

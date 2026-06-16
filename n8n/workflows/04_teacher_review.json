@@ -1,0 +1,245 @@
+{
+  "name": "04 — Teacher Feedback Review (Human-in-the-Loop)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "request-review",
+        "options": {}
+      },
+      "name": "Webhook: Request Review",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -520,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=http://api:8001/students/{{ $json.body.student_id }}/feedback",
+        "options": {}
+      },
+      "name": "GET AI feedback",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -300,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"Review requested for {{ $json.student_id }}\",\n  \"blocks\": [\n    { \"type\": \"section\", \"text\": { \"type\": \"mrkdwn\", \"text\": \"*Feedback for {{ $json.student_id }}*\\n{{ $json.feedback }}\" } },\n    { \"type\": \"actions\", \"elements\": [\n      { \"type\": \"button\", \"text\": { \"type\": \"plain_text\", \"text\": \"Approve\" }, \"style\": \"primary\", \"value\": \"approve\" },\n      { \"type\": \"button\", \"text\": { \"type\": \"plain_text\", \"text\": \"Edit\" }, \"value\": \"edit\" },\n      { \"type\": \"button\", \"text\": { \"type\": \"plain_text\", \"text\": \"Reject\" }, \"style\": \"danger\", \"value\": \"reject\" }\n    ] }\n  ]\n}",
+        "options": {}
+      },
+      "name": "Slack interactive message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -80,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "review-action",
+        "options": {}
+      },
+      "name": "Webhook: Review Action",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -520,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.body.decision }}",
+        "rules": {
+          "rules": [
+            {
+              "value2": "approve",
+              "output": 0
+            },
+            {
+              "value2": "edit",
+              "output": 1
+            },
+            {
+              "value2": "reject",
+              "output": 2
+            }
+          ]
+        }
+      },
+      "name": "Switch on decision",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [
+        -300,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.SMTP_FROM }}",
+        "toEmail": "={{ $json.body.student_id }}@students.example.com",
+        "subject": "Your learning feedback (teacher-approved)",
+        "text": "={{ $json.body.feedback_text }}",
+        "emailFormat": "text",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Email: Approved",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        -60,
+        320
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "slaMailhogSmtp01",
+          "name": "Mailhog SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.SMTP_FROM }}",
+        "toEmail": "={{ $json.body.student_id }}@students.example.com",
+        "subject": "Your learning feedback (edited by your teacher)",
+        "text": "={{ $json.body.edited_text }}",
+        "emailFormat": "text",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Email: Edited",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        -60,
+        460
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "slaMailhogSmtp01",
+          "name": "Mailhog SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://api:8001/students/{{ $json.body.student_id }}/feedback/log",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"channel\": \"manual\", \"status\": \"{{ $json.body.decision === 'approve' ? 'approved' : ($json.body.decision === 'edit' ? 'edited' : 'rejected') }}\", \"feedback_text\": {{ JSON.stringify($json.body.feedback_text || $json.body.edited_text || '') }}, \"note\": {{ JSON.stringify($json.body.note || '') }} }",
+        "options": {}
+      },
+      "name": "Log decision (audit)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        420
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook: Request Review": {
+      "main": [
+        [
+          {
+            "node": "GET AI feedback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET AI feedback": {
+      "main": [
+        [
+          {
+            "node": "Slack interactive message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook: Review Action": {
+      "main": [
+        [
+          {
+            "node": "Switch on decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch on decision": {
+      "main": [
+        [
+          {
+            "node": "Email: Approved",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Email: Edited",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log decision (audit)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email: Approved": {
+      "main": [
+        [
+          {
+            "node": "Log decision (audit)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email: Edited": {
+      "main": [
+        [
+          {
+            "node": "Log decision (audit)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false
+}

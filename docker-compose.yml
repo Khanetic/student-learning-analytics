@@ -21,6 +21,8 @@ x-airflow-common: &airflow-common
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-sla}:${POSTGRES_PASSWORD:-sla_password}@postgres:5432/airflow
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+    # Enable basic-auth on the stable REST API so the API/n8n can trigger DAGs.
+    AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth
     AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY:-}
     AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW__WEBSERVER__SECRET_KEY:-change-me}
     AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
@@ -125,6 +127,10 @@ services:
       POSTGRES_PORT: "5432"
       CHROMA_HOST: chromadb
       CHROMA_PORT: "8000"
+      # Reach Airflow over the compose network for /pipeline/* endpoints.
+      AIRFLOW_API_URL: http://airflow-webserver:8080/api/v1
+      AIRFLOW_ADMIN_USER: ${AIRFLOW_ADMIN_USER:-admin}
+      AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-admin}
     volumes:
       - .:/app
     ports:
@@ -163,6 +169,30 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Next.js dashboard (mirrors the Streamlit app). NEXT_PUBLIC_API_URL is baked
+  # into the client bundle at build time and must be reachable from the user's
+  # browser — i.e. the host-published API port, not the docker-internal name.
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8001}
+    image: sla/frontend:0.1.0
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8001}
+    ports:
+      - "${NEXTJS_HOST_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
   chromadb:
     image: chromadb/chroma:0.5.23
     environment:
@@ -179,7 +209,43 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # n8n — event-driven automation alongside Airflow (alerts, feedback delivery,
+  # human-in-the-loop review, pipeline orchestration). Workflows in ./n8n.
+  n8n:
+    image: n8nio/n8n:1.64.0
+    environment:
+      N8N_BASIC_AUTH_ACTIVE: ${N8N_BASIC_AUTH_ACTIVE:-true}
+      N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER:-admin}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD:-admin}
+      # Local dev convenience: skip the owner login screen entirely.
+      N8N_USER_MANAGEMENT_DISABLED: ${N8N_USER_MANAGEMENT_DISABLED:-true}
+      WEBHOOK_URL: ${WEBHOOK_URL:-http://localhost:5678}
+      GENERIC_TIMEZONE: Europe/Berlin
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      # Exposed to workflows as $env.* (email From address + Slack target).
+      SMTP_FROM: ${SMTP_FROM:-learning-analytics@example.com}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+    volumes:
+      - n8n-data:/home/node/.n8n
+      - ./n8n/workflows:/workflows:ro
+    ports:
+      - "${N8N_HOST_PORT:-5678}:5678"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Mailhog — local SMTP sink for testing email nodes without a real provider.
+  # SMTP on :1025 (point the n8n SMTP credential here), web UI on :8025.
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    ports:
+      - "${MAILHOG_SMTP_PORT:-1025}:1025"
+      - "${MAILHOG_UI_PORT:-8025}:8025"
+    restart: unless-stopped
+
 volumes:
   postgres-data:
   chroma-data:
   airflow-logs:
+  n8n-data:

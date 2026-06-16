@@ -64,6 +64,13 @@ class Settings(BaseSettings):
         default="http://localhost:8501,http://localhost:3000", alias="CORS_ORIGINS"
     )
 
+    # --- Airflow REST API (Phase 6: pipeline trigger/monitor endpoints) ---
+    airflow_api_url: str = Field(
+        default="http://localhost:8080/api/v1", alias="AIRFLOW_API_URL"
+    )
+    airflow_admin_user: str = Field(default="admin", alias="AIRFLOW_ADMIN_USER")
+    airflow_admin_password: str = Field(default="admin", alias="AIRFLOW_ADMIN_PASSWORD")
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def database_url(self) -> str:

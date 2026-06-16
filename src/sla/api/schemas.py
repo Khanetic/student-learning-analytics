@@ -73,6 +73,41 @@ class Feedback(BaseModel):
     context: list[RetrievedContext] = Field(default_factory=list)
 
 
+class FeedbackLogIn(BaseModel):
+    """Request body for recording a feedback delivery / review event."""
+
+    channel: str = Field(default="email", examples=["email", "slack", "manual"])
+    status: str = Field(..., examples=["sent", "approved", "edited", "rejected", "failed"])
+    feedback_text: str | None = None
+    note: str | None = Field(default=None, description="Rejection reason or edit note")
+
+
+class FeedbackLogEntry(FeedbackLogIn):
+    """A persisted feedback-log row (audit trail)."""
+
+    id: int
+    student_id: str
+    created_at: datetime
+
+
+class PipelineTriggerIn(BaseModel):
+    """Request body to trigger an Airflow DAG run."""
+
+    dag_id: str = Field(
+        default="dag_ingest", examples=["dag_ingest", "dag_transform", "dag_indicators"]
+    )
+
+
+class PipelineRun(BaseModel):
+    """Status of an Airflow DAG run (trigger + monitor)."""
+
+    dag_id: str
+    dag_run_id: str
+    state: str = Field(..., examples=["queued", "running", "success", "failed"])
+    logical_date: datetime | None = None
+    end_date: datetime | None = None
+
+
 class Health(BaseModel):
     """Service health report."""
 

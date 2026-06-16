@@ -1,0 +1,200 @@
+{
+  "name": "01 — At-Risk Student Alert",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "name": "Every day 08:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -360,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://api:8001/students/at-risk",
+        "options": {}
+      },
+      "name": "GET at-risk students",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -140,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCommand": "const seen = $getWorkflowStaticData('global').seenIds || [];\nconst current = items.map(i => i.json.student_id);\nconst newIds = current.filter(id => !seen.includes(id));\n$getWorkflowStaticData('global').seenIds = current;\nconst newOnes = items.filter(i => newIds.includes(i.json.student_id));\nreturn newOnes.length ? newOnes : [];"
+      },
+      "name": "Diff vs last run",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        80,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $items().length }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "name": "Any new at-risk?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        300,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.SMTP_FROM }}",
+        "toEmail": "teacher@example.com",
+        "subject": "⚠️ New at-risk students detected",
+        "text": "=The following students became at-risk today:\n\n{{ $items().map(i => `- ${i.json.name} (${i.json.student_id}) — engagement ${i.json.indicators.engagement_score}`).join('\\n') }}",
+        "emailFormat": "text",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Email teacher (SMTP)",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        540,
+        200
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "slaMailhogSmtp01",
+          "name": "Mailhog SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"channel\": \"#at-risk-alerts\", \"text\": \"⚠️ *{{ $items().length }} new at-risk student(s)*: {{ $items().map(i => i.json.name).join(', ') }}\" }",
+        "options": {}
+      },
+      "name": "Post to Slack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        540,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "analytics",
+        "table": "feedback_log",
+        "columns": "student_id,channel,status,note",
+        "additionalFields": {}
+      },
+      "name": "Log alert to Postgres",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        780,
+        360
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "slaPostgresCred01",
+          "name": "SLA Postgres"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every day 08:00": {
+      "main": [
+        [
+          {
+            "node": "GET at-risk students",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET at-risk students": {
+      "main": [
+        [
+          {
+            "node": "Diff vs last run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Diff vs last run": {
+      "main": [
+        [
+          {
+            "node": "Any new at-risk?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any new at-risk?": {
+      "main": [
+        [
+          {
+            "node": "Email teacher (SMTP)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Post to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Post to Slack": {
+      "main": [
+        [
+          {
+            "node": "Log alert to Postgres",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false
+}

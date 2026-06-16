@@ -1,0 +1,201 @@
+{
+  "name": "02 — Weekly Feedback Delivery",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1"
+            }
+          ]
+        }
+      },
+      "name": "Every Monday 09:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -480,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://api:8001/students",
+        "options": {}
+      },
+      "name": "GET all students",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -260,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "name": "Loop over students",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -40,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=http://api:8001/students/{{ $json.student_id }}/feedback",
+        "options": {}
+      },
+      "name": "GET feedback (RAG)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.SMTP_FROM }}",
+        "toEmail": "={{ $json.student_id }}@students.example.com",
+        "subject": "Your weekly learning feedback",
+        "text": "={{ $json.feedback }}",
+        "emailFormat": "text",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Email student (SMTP)",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        420,
+        300
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "slaMailhogSmtp01",
+          "name": "Mailhog SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://api:8001/students/{{ $('GET feedback (RAG)').item.json.student_id }}/feedback/log",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"channel\": \"email\", \"status\": \"sent\", \"feedback_text\": {{ JSON.stringify($('GET feedback (RAG)').item.json.feedback) }} }",
+        "options": {}
+      },
+      "name": "Log delivery",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        640,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"channel\": \"#weekly-feedback\", \"text\": \"✅ Weekly feedback delivered to {{ $runIndex + 1 }} students.\" }",
+        "options": {}
+      },
+      "name": "Slack summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        200,
+        480
+      ]
+    }
+  ],
+  "connections": {
+    "Every Monday 09:00": {
+      "main": [
+        [
+          {
+            "node": "GET all students",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET all students": {
+      "main": [
+        [
+          {
+            "node": "Loop over students",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop over students": {
+      "main": [
+        [
+          {
+            "node": "Slack summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "GET feedback (RAG)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET feedback (RAG)": {
+      "main": [
+        [
+          {
+            "node": "Email student (SMTP)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email student (SMTP)": {
+      "main": [
+        [
+          {
+            "node": "Log delivery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log delivery": {
+      "main": [
+        [
+          {
+            "node": "Loop over students",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false
+}

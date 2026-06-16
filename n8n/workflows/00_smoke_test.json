@@ -1,0 +1,69 @@
+{
+  "name": "00 — Smoke Test (manual)",
+  "nodes": [
+    {
+      "parameters": {},
+      "name": "When clicked",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-540, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://api:8001/students/at-risk",
+        "options": {}
+      },
+      "name": "GET at-risk",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-320, 300]
+    },
+    {
+      "parameters": {
+        "url": "=http://api:8001/students/{{ $json.student_id }}/feedback",
+        "options": {}
+      },
+      "name": "GET feedback (RAG)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-100, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.SMTP_FROM }}",
+        "toEmail": "=teacher@example.com",
+        "subject": "=Feedback for {{ $json.student_id }}",
+        "text": "={{ $json.feedback }}",
+        "emailFormat": "text",
+        "options": { "appendAttribution": false }
+      },
+      "name": "Email (Mailhog)",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [120, 300],
+      "credentials": { "smtp": { "id": "slaMailhogSmtp01", "name": "Mailhog SMTP" } }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://api:8001/students/{{ $('GET feedback (RAG)').item.json.student_id }}/feedback/log",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"channel\": \"manual\", \"status\": \"sent\", \"note\": \"smoke-test via n8n\" }",
+        "options": {}
+      },
+      "name": "POST feedback/log",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [340, 300]
+    }
+  ],
+  "connections": {
+    "When clicked": { "main": [[{ "node": "GET at-risk", "type": "main", "index": 0 }]] },
+    "GET at-risk": { "main": [[{ "node": "GET feedback (RAG)", "type": "main", "index": 0 }]] },
+    "GET feedback (RAG)": { "main": [[{ "node": "Email (Mailhog)", "type": "main", "index": 0 }]] },
+    "Email (Mailhog)": { "main": [[{ "node": "POST feedback/log", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "active": false
+}
