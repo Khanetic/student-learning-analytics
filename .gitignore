@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Test / tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Environment & secrets
+.env
+*.env
+!.env.example
+
+# Generated simulation data (keep the folders, drop the contents)
+data/raw/*
+!data/raw/.gitkeep
+
+# Vector store / databases
+chroma/
+*.sqlite3
+*.db
+
+# Airflow runtime
+logs/
+airflow.cfg
+airflow.db
+webserver_config.py
+
+# Frontend (Next.js, added later)
+frontend/node_modules/
+frontend/.next/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

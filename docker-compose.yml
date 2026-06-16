@@ -1,0 +1,185 @@
+# ===========================================================================
+# Student Learning Analytics — Docker Compose
+# ===========================================================================
+# Phase 2 services: PostgreSQL (app + Airflow metadata), Airflow (init,
+# webserver, scheduler) and ChromaDB. The FastAPI `api` and Streamlit
+# `dashboard` services are added in Phases 4 and 5.
+#
+#   docker compose up -d              # start everything
+#   docker compose --profile etl up   # (later) include api + dashboard
+#
+# All configuration is environment-driven; copy .env.example to .env first.
+# ===========================================================================
+
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: docker/airflow.Dockerfile
+  image: sla/airflow:2.9.3
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-sla}:${POSTGRES_PASSWORD:-sla_password}@postgres:5432/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY:-}
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW__WEBSERVER__SECRET_KEY:-change-me}
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+    PYTHONPATH: /opt/airflow/repo/src
+    # App database (used by the sla package inside the DAGs).
+    POSTGRES_HOST: postgres
+    POSTGRES_PORT: "5432"
+    POSTGRES_USER: ${POSTGRES_USER:-sla}
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sla_password}
+    POSTGRES_DB: ${POSTGRES_DB:-sla}
+    SLA_DATA_DIR: /opt/airflow/repo/data
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - airflow-logs:/opt/airflow/logs
+    - .:/opt/airflow/repo
+  user: "${AIRFLOW_UID:-50000}:0"
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sla}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sla_password}
+      POSTGRES_DB: ${POSTGRES_DB:-sla}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Init scripts run in alphabetical order on first boot:
+      # 00 creates the airflow metadata DB, 01/02 build the star schema.
+      - ./sql/00_databases.sql:/docker-entrypoint-initdb.d/00_databases.sql:ro
+      - ./sql/01_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./sql/02_indexes.sql:/docker-entrypoint-initdb.d/02_indexes.sql:ro
+    ports:
+      # Host port is configurable to avoid clashes with other local Postgres
+      # instances; the in-network port stays 5432 (used by Airflow).
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER:-sla}", "-d", "${POSTGRES_DB:-sla}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  airflow-init:
+    <<: *airflow-common
+    # One-shot: migrate the metadata DB and create the admin user.
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate
+        airflow users create \
+          --username "${AIRFLOW_ADMIN_USER:-admin}" \
+          --password "${AIRFLOW_ADMIN_PASSWORD:-admin}" \
+          --firstname Admin --lastname User --role Admin \
+          --email admin@example.com || true
+    restart: on-failure
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname \"$(hostname)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    image: sla/api:0.1.0
+    env_file: .env
+    environment:
+      # Service-network overrides (win over .env values).
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      CHROMA_HOST: chromadb
+      CHROMA_PORT: "8000"
+    volumes:
+      - .:/app
+    ports:
+      - "${API_HOST_PORT:-8001}:8001"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8001/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    depends_on:
+      postgres:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: docker/streamlit.Dockerfile
+    image: sla/streamlit:0.1.0
+    env_file: .env
+    environment:
+      API_BASE_URL: http://api:8001
+    volumes:
+      - .:/app
+    ports:
+      - "${STREAMLIT_HOST_PORT:-8501}:8501"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8501/_stcore/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  chromadb:
+    image: chromadb/chroma:0.5.23
+    environment:
+      IS_PERSISTENT: "TRUE"
+      ANONYMIZED_TELEMETRY: "FALSE"
+    volumes:
+      - chroma-data:/chroma/chroma
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  chroma-data:
+  airflow-logs:

@@ -1,0 +1,37 @@
+# Keep build contexts small and images clean (Dockerfiles use `COPY . .`).
+.git
+.github
+.venv
+venv
+env
+__pycache__
+*.py[cod]
+*.egg-info
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.coverage
+htmlcov
+
+# Local environment & secrets (never bake into an image)
+.env
+*.env
+!.env.example
+
+# Generated / runtime data
+data/raw/*
+!data/raw/.gitkeep
+logs
+chroma
+*.sqlite3
+*.db
+
+# Frontend (added later)
+frontend/node_modules
+frontend/.next
+
+# Docs/editor noise
+.idea
+.vscode
+.DS_Store
+phase1.md

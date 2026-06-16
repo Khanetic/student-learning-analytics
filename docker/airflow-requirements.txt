@@ -1,0 +1,6 @@
+# Extra Python deps layered onto the official Airflow 2.9 (py3.11) image.
+# pandas, numpy, SQLAlchemy and pydantic v2 already ship with Airflow 2.9,
+# so only the project's additional runtime needs are listed here.
+psycopg2-binary>=2.9,<3.0
+Faker>=25.0,<31.0
+pydantic-settings>=2.3,<3.0
