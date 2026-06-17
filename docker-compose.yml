@@ -184,10 +184,16 @@ services:
     ports:
       - "${NEXTJS_HOST_PORT:-3000}:3000"
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000"]
+      # node is always present in the runtime image; wget/curl are not guaranteed.
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('http').get('http://localhost:3000',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"
       interval: 15s
       timeout: 10s
       retries: 5
+      start_period: 20s
     depends_on:
       api:
         condition: service_healthy

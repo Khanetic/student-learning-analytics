@@ -14,9 +14,10 @@ documented REST API.
 The project is inspired by learning analytics research at **CATALPA / LEAD:FUH
 (FernUniversität Hagen)**. It is fully containerized: a single
 `docker compose up` brings up the database, orchestration, vector store, API,
-and dashboard. The RAG pipeline runs offline with a deterministic mock provider
-and transparently upgrades to OpenAI when an API key is supplied, so the system
-demos end-to-end with **zero secrets required**.
+two dashboards (Streamlit + Next.js), and an n8n automation layer. The RAG
+pipeline runs offline with a deterministic mock provider and transparently
+upgrades to OpenAI when an API key is supplied, so the system demos end-to-end
+with **zero secrets required**.
 
 ---
 
@@ -37,12 +38,18 @@ demos end-to-end with **zero secrets required**.
   a three-paragraph, personalized message (OpenAI or offline mock).
 - **REST API** — a frontend-agnostic FastAPI service with a typed Pydantic
   contract, proper status codes, and CORS.
-- **Interactive dashboard** — a multi-page Streamlit app with Plotly
-  visualizations that consumes the API only (no direct database access) and
-  degrades gracefully when the backend is unavailable.
+- **Two dashboards** — a multi-page **Streamlit** app (Plotly) and a modern
+  **Next.js 14** app (TypeScript, Tailwind, shadcn-style UI, Recharts) with
+  loading skeletons, dark mode, and a mobile-responsive layout. Both consume the
+  API only (no direct database access) and degrade gracefully when the backend
+  is unavailable.
+- **Workflow automation (n8n)** — an event-driven layer alongside Airflow:
+  at-risk alerts, weekly feedback delivery, pipeline trigger/monitor,
+  human-in-the-loop teacher review, and student onboarding. Ships with a Mailhog
+  SMTP sink and importable, pre-credentialed workflows.
 - **Production hygiene** — full containerization, environment-driven config (no
-  hardcoded secrets), GitHub Actions CI (lint, tests, image builds), and a
-  reproducible, seeded data pipeline.
+  hardcoded secrets), GitHub Actions CI (lint, tests, frontend build, image
+  builds), and a reproducible, seeded data pipeline.
 
 ---
 
@@ -61,7 +68,10 @@ flowchart LR
     PED[data/pedagogy] --> RAG[RAG · ChromaDB]
     RAG --> API
     API --> DASH[Streamlit dashboard]
-    API --> NEXT[Next.js frontend · future]
+    API --> NEXT[Next.js dashboard]
+    API --> N8N[n8n automation]
+    N8N -->|trigger DAGs / alerts / email| API
+    N8N --> MAIL[Mailhog · SMTP]
 ```
 
 A single shared package (`src/sla`) holds all business logic — simulation, ETL,
@@ -82,7 +92,8 @@ suite reuse exactly the same code.
 | RAG / LLM        | LangChain + OpenAI (offline mock fallback)  |
 | Vector store     | ChromaDB                                    |
 | Backend API      | FastAPI + Uvicorn                           |
-| Dashboard        | Streamlit + Plotly                          |
+| Dashboards       | Streamlit + Plotly · Next.js 14 + Recharts  |
+| Automation       | n8n + Mailhog (local SMTP)                   |
 | CI/CD            | GitHub Actions                              |
 | Testing / lint   | pytest + ruff                               |
 
@@ -97,19 +108,24 @@ git clone https://github.com/Khanetic/student-learning-analytics.git
 cd student-learning-analytics
 cp .env.example .env                 # optional: add OPENAI_API_KEY for real LLM
 
-docker compose up -d --build         # postgres, airflow, chromadb, api, dashboard
+docker compose up -d --build         # full stack (DB, Airflow, Chroma, API, both UIs, n8n, Mailhog)
 make pipeline                        # run ingest -> transform -> indicators DAGs
 make rag-ingest                      # embed pedagogy docs into ChromaDB
 ```
 
-| Service             | URL                          | Notes              |
-| ------------------- | ---------------------------- | ------------------ |
-| Streamlit dashboard | http://localhost:8501        | main UI            |
-| FastAPI + Swagger   | http://localhost:8001/docs   | REST API           |
-| Airflow             | http://localhost:8080        | `admin` / `admin`  |
+| Service             | URL                          | Notes                       |
+| ------------------- | ---------------------------- | --------------------------- |
+| Next.js dashboard   | http://localhost:3000        | primary UI (TS/Tailwind)    |
+| Streamlit dashboard | http://localhost:8501        | original UI                 |
+| FastAPI + Swagger   | http://localhost:8001/docs   | REST API                    |
+| Airflow             | http://localhost:8080        | `admin` / `admin`           |
+| n8n                 | http://localhost:5678        | automation (no login, dev)  |
+| Mailhog             | http://localhost:8025        | local email inbox           |
 
-> If a host port is already in use, override `POSTGRES_HOST_PORT`,
-> `API_HOST_PORT`, or `STREAMLIT_HOST_PORT` in `.env`.
+> Runs **fully offline** — no `OPENAI_API_KEY` required (deterministic mock provider).
+> If a host port is already in use, override `POSTGRES_HOST_PORT`, `API_HOST_PORT`,
+> `STREAMLIT_HOST_PORT`, or `NEXTJS_HOST_PORT` in `.env`. For n8n setup see
+> [`n8n/README.md`](n8n/README.md).
 
 ---
 
@@ -170,24 +186,33 @@ weights and thresholds, individually unit-tested against edge cases.
 | `GET /health`                  | API, database, vector store, and LLM provider     |
 | `GET /students`                | all students with their indicators                |
 | `GET /students/{id}`           | a single student (404 if missing)                 |
+| `GET /students/at-risk`        | only at-risk students (alerting convenience)      |
 | `GET /students/{id}/quiz-attempts` | quiz attempts ordered by time                 |
 | `GET /students/{id}/sessions`  | sessions ordered by time                          |
 | `GET /students/{id}/feedback`  | RAG-generated feedback (409 if no indicators)     |
+| `POST /students/{id}/feedback/log` | record a feedback delivery / review event     |
+| `POST /pipeline/trigger`       | trigger an Airflow DAG run (REST passthrough)     |
+| `GET /pipeline/status/{dag_id}`| latest Airflow DAG run state                      |
 
 Interactive documentation is available at `/docs`. Request/response models are
-defined in `src/sla/api/schemas.py`.
+defined in `src/sla/api/schemas.py`. The `/pipeline/*` and `/feedback/log`
+endpoints back the n8n automation workflows.
 
 ---
 
-## Dashboard
+## Dashboards
 
-A multi-page Streamlit app (`dashboard/`) that talks only to the API:
+Two dashboards consume the API only (no direct DB access) and share the same four views:
 
 - **Overview** — cohort metric cards and distribution charts.
 - **Student list** — sortable, filterable table with drill-through to detail.
 - **Student detail** — indicator radar, quiz-score trend, session activity
   heatmap, and an on-demand AI feedback panel.
-- **At-risk** — focused list with bulk feedback generation.
+- **At-risk** — focused list with bulk feedback generation and CSV export.
+
+- **Next.js 14** (`frontend/`) — TypeScript, Tailwind, shadcn-style components,
+  Recharts; loading skeletons, dark mode, mobile-responsive, error boundary.
+- **Streamlit** (`dashboard/`) — the original Plotly app, kept as a mirror.
 
 If the API is unreachable, every page shows a friendly banner instead of failing.
 
@@ -205,10 +230,13 @@ student-learning-analytics/
 │   ├── rag/            # provider, ingest, retrieve, generate, service
 │   └── api/            # FastAPI app, schemas, dependencies
 ├── dags/               # Airflow DAGs
+├── frontend/           # Next.js 14 dashboard (TypeScript)
 ├── dashboard/          # Streamlit multi-page app
+├── n8n/                # automation workflows + credentials + README
 ├── sql/                # star-schema DDL + indexes
 ├── data/pedagogy/      # markdown corpus for the RAG pipeline
 ├── docker/             # service Dockerfiles
+├── docs/               # dashboard screenshots
 ├── tests/              # pytest suite
 └── docker-compose.yml  # full stack
 ```
@@ -237,7 +265,22 @@ pull request to `main`: `ruff` lint, the full `pytest` suite, and a
 
 ## Screenshots
 
-_Dashboard screenshots will be added here._
+Next.js dashboard (http://localhost:3000):
+
+| Overview | Student detail |
+| --- | --- |
+| ![Overview](docs/dashboard-overview.png) | ![Student detail](docs/dashboard-student-detail.png) |
+| **Student list** | **At-risk** |
+| ![Students](docs/dashboard-students.png) | ![At-risk](docs/dashboard-at-risk.png) |
+
+> **Demo video:** drop a short screen recording at `docs/demo.mp4` (or a GIF at
+> `docs/demo.gif`) and it renders below.
+>
+> <!-- ![Demo](docs/demo.gif) -->
+> <!-- https://github.com/Khanetic/student-learning-analytics/assets/<id>/demo.mp4 -->
+
+_Tip: regenerate these screenshots from the running stack with headless Chrome —_
+_`google-chrome --headless=new --screenshot=docs/dashboard-overview.png --window-size=1440,1080 http://localhost:3000/`._
 
 ---
 

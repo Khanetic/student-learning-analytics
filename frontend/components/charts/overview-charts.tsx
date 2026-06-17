@@ -49,7 +49,7 @@ export function EngagementHistogram({ students }: { students: Student[] }) {
             <XAxis dataKey="range" stroke={AXIS} fontSize={11} />
             <YAxis allowDecimals={false} stroke={AXIS} fontSize={11} />
             <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "hsl(var(--muted))" }} />
-            <Bar dataKey="count" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="count" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} isAnimationActive={false} />
           </BarChart>
         </ResponsiveContainer>
       </CardContent>
@@ -72,7 +72,7 @@ export function AtRiskDonut({ students }: { students: Student[] }) {
       <CardContent>
         <ResponsiveContainer width="100%" height={260}>
           <PieChart>
-            <Pie data={data} dataKey="value" nameKey="name" innerRadius={55} outerRadius={90}>
+            <Pie data={data} dataKey="value" nameKey="name" innerRadius={55} outerRadius={90} isAnimationActive={false}>
               {data.map((d) => (
                 <Cell key={d.name} fill={d.color} />
               ))}
@@ -112,7 +112,7 @@ export function QuizTrendBar({ students }: { students: Student[] }) {
             <XAxis dataKey="trend" stroke={AXIS} fontSize={11} />
             <YAxis allowDecimals={false} stroke={AXIS} fontSize={11} />
             <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "hsl(var(--muted))" }} />
-            <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+            <Bar dataKey="count" radius={[4, 4, 0, 0]} isAnimationActive={false}>
               {data.map((d) => (
                 <Cell key={d.trend} fill={d.color} />
               ))}

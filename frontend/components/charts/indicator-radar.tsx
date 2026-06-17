@@ -28,6 +28,7 @@ export function IndicatorRadar({ indicators }: { indicators: Indicators }) {
           stroke="hsl(var(--primary))"
           fill="hsl(var(--primary))"
           fillOpacity={0.35}
+          isAnimationActive={false}
         />
       </RadarChart>
     </ResponsiveContainer>

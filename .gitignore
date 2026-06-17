@@ -40,6 +40,12 @@ webserver_config.py
 frontend/node_modules/
 frontend/.next/
 
+# Local dev notes / planning docs (not part of the deliverable)
+phase1.md
+plan.md
+*.original.md
+n8n/workflows/_creds.json
+
 # OS / editor
 .DS_Store
 .idea/

@@ -42,6 +42,7 @@ export function QuizTrendLine({ attempts }: { attempts: QuizAttempt[] }) {
           stroke="hsl(var(--primary))"
           strokeWidth={2}
           dot={{ r: 3 }}
+          isAnimationActive={false}
         />
       </LineChart>
     </ResponsiveContainer>
