@@ -43,6 +43,7 @@ frontend/.next/
 # Local dev notes / planning docs (not part of the deliverable)
 phase1.md
 plan.md
+IMPROVEMENTS.md
 *.original.md
 n8n/workflows/_creds.json
 
